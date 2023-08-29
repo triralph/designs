@@ -9,3 +9,6 @@
 
 ## Simple Node App design with redundancy. 
 ![alt text](https://github.com/triralph/designs/blob/main/aws-diagrams/NodeApp.png)
+
+## Blue/Green CodePipeline for web applications
+![alt text](https://github.com/triralph/designs/blob/main/aws-diagrams/CodePipeline_Work.png)
