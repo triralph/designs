@@ -93,7 +93,7 @@ ssh -i ~/.ssh/$PEM ec2-user@$EC2_INSTANCE_IP -t 'bash -c "docker exec -it $( doc
 echo '-> Stopping task...'
 STOPTASK=$(aws ecs stop-task --region $AWS_REGION --cluster $CLUSTER --task $TASK_ID --reason 'user-console/stop')
 echo -e '\r-> Stopping task... done'
-data2="$USER has ended the rails console session"
+data2="$USER has ended the console session"
 payload2='payload={"channel": "#slach_channel", "username": "Console", "attachments":[
         {
             "fallback": "Required plain-text summary of the attachment.",
