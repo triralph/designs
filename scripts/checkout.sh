@@ -61,8 +61,8 @@ EC2_INSTANCE_ID=$(aws ecs describe-container-instances --region $AWS_REGION  --c
 EC2_INSTANCE_IP=$(aws ec2 describe-instances --region $AWS_REGION --instance-ids $EC2_INSTANCE_ID | jq -r '.Reservations[].Instances[].NetworkInterfaces[].PrivateIpAddresses[].PrivateIpAddress')
 
 echo '-> Logging into your console'
-data1="$USER has started a rails console session"
-payload1='payload={"channel": "#devops", "username": "Rails Console", "attachments":[
+data1="$USER has started a console session"
+payload1='payload={"channel": "#slack_channel", "username": "Console", "attachments":[
         {
             "fallback": "Required plain-text summary of the attachment.",
             "color": "#3AA3E3",
@@ -94,7 +94,7 @@ echo '-> Stopping task...'
 STOPTASK=$(aws ecs stop-task --region $AWS_REGION --cluster $CLUSTER --task $TASK_ID --reason 'user-console/stop')
 echo -e '\r-> Stopping task... done'
 data2="$USER has ended the rails console session"
-payload2='payload={"channel": "#devops", "username": "Rails Console", "attachments":[
+payload2='payload={"channel": "#slach_channel", "username": "Console", "attachments":[
         {
             "fallback": "Required plain-text summary of the attachment.",
             "color": "good",
