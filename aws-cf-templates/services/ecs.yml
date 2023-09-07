@@ -1,0 +1,152 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: v1.0 # Cheap cost effective way to leverage unused spot instances for testing application. 
+Parameters:
+  SpotBid:
+    Default: '0.104'
+    Description: Spot bid price
+    Type: String
+  AppName:
+    Type: String
+    Description: application name that will generate the directories
+    Default: null
+  KeyName:
+    Type: String
+    Default: # AWS pem key you wish to use. 
+
+Mappings:
+  ECSRegionToAMI:
+    us-east-1:
+      AMIID: ami-00eb0dc604a8124fd
+
+Resources:
+  ECScluster:
+    Type: "AWS::ECS::Cluster"
+    Properties:
+      ClusterName: !Sub ${AppName}-ecs
+
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS Security Group
+      VpcId: !ImportValue # Inject your value here.
+  EcsSecurityGroupHTTPinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'EcsSecurityGroup'
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+  EcsSecurityGroupALBports:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'EcsSecurityGroup'
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      CidrIp: 0.0.0.0/0
+
+  SpotFleet:
+    Type: AWS::EC2::SpotFleet
+    Properties:
+      SpotFleetRequestConfigData:
+        IamFleetRole: # Inject your role here.
+        SpotPrice: !Ref SpotBid
+        ReplaceUnhealthyInstances: true
+        TargetCapacity: 2
+        TerminateInstancesWithExpiration: false
+        AllocationStrategy: diversified
+        LaunchSpecifications:
+          - InstanceType: r3.large
+            IamInstanceProfile:
+              Arn: # Inject your role here.
+            ImageId: !FindInMap [ ECSRegionToAMI, !Ref 'AWS::Region', AMIID ]
+            KeyName: !Ref 'ECSKeyName'
+            Monitoring:
+              Enabled: true
+            UserData:
+              Fn::Base64: !Sub |
+                #!/bin/bash -xe
+                echo ECS_CLUSTER=${ECScluster} >> /etc/ecs/ecs.config
+                echo ECS_CONTAINER_STOP_TIMEOUT=30s >> /etc/ecs/ecs.config
+                echo ECS_AVAILABLE_LOGGING_DRIVERS='["splunk","awslogs"]' >> /etc/ecs/ecs.config
+                yum install -y aws-cfn-bootstrap aws-cli          
+                /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --region ${AWS::Region} -r SpotFleet
+            SecurityGroups:
+              - GroupId: !Ref 'EcsSecurityGroup'
+            SubnetId: # Inject your subnet here.
+            TagSpecifications:
+              - ResourceType: instance
+                Tags:
+                  - Key: Name
+                    Value: !Sub ${AppName}-ecs-host-1
+          - InstanceType: r4.large
+            IamInstanceProfile:
+              Arn: # Inject your role here.
+            ImageId: !FindInMap [ ECSRegionToAMI, !Ref 'AWS::Region', AMIID ]
+            KeyName: !Ref 'ECSKeyName'
+            Monitoring:
+              Enabled: true
+            UserData:
+              Fn::Base64: !Sub |
+                #!/bin/bash -xe
+                echo ECS_CLUSTER=${ECScluster} >> /etc/ecs/ecs.config
+                echo ECS_CONTAINER_STOP_TIMEOUT=30s >> /etc/ecs/ecs.config
+                echo ECS_AVAILABLE_LOGGING_DRIVERS='["splunk","awslogs"]' >> /etc/ecs/ecs.config
+                yum install -y aws-cfn-bootstrap aws-cli 
+                /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --region ${AWS::Region} -r SpotFleet
+            SecurityGroups:
+              - GroupId: !Ref 'EcsSecurityGroup'
+            SubnetId: # Inject your subnet here.
+            TagSpecifications:
+              - ResourceType: instance
+                Tags:
+                  - Key: Name
+                    Value: !Sub ${AppName}-ecs-host-2
+          - InstanceType: i3.large
+            IamInstanceProfile:
+              Arn: # Inject your role here.
+            ImageId: !FindInMap [ ECSRegionToAMI, !Ref 'AWS::Region', AMIID ]
+            KeyName: !Ref 'ECSKeyName'
+            Monitoring:
+              Enabled: true
+            UserData:
+              Fn::Base64: !Sub |
+                #!/bin/bash -xe
+                echo ECS_CLUSTER=${ECScluster} >> /etc/ecs/ecs.config
+                echo ECS_CONTAINER_STOP_TIMEOUT=30s >> /etc/ecs/ecs.config
+                echo ECS_AVAILABLE_LOGGING_DRIVERS='["splunk","awslogs"]' >> /etc/ecs/ecs.config
+                yum install -y aws-cfn-bootstrap aws-cli           
+                /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --region ${AWS::Region} -r SpotFleet
+            SecurityGroups:
+              - GroupId: !Ref 'EcsSecurityGroup'
+            SubnetId: # Inject your subnet here.
+            TagSpecifications:
+              - ResourceType: instance
+                Tags:
+                  - Key: Name
+                    Value: !Sub ${AppName}-ecs-host-3
+          - InstanceType: m3.xlarge
+            IamInstanceProfile:
+              Arn: # Inject your role here.
+            ImageId: !FindInMap [ ECSRegionToAMI, !Ref 'AWS::Region', AMIID ]
+            KeyName: !Ref 'ECSKeyName'
+            Monitoring:
+              Enabled: true
+            UserData:
+              Fn::Base64: !Sub |
+                #!/bin/bash -xe
+                echo ECS_CLUSTER=${ECScluster} >> /etc/ecs/ecs.config
+                echo ECS_CONTAINER_STOP_TIMEOUT=30s >> /etc/ecs/ecs.config
+                echo ECS_AVAILABLE_LOGGING_DRIVERS='["splunk","awslogs"]' >> /etc/ecs/ecs.config
+                /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --region ${AWS::Region} -r SpotFleet
+            SecurityGroups:
+              - GroupId: !Ref 'EcsSecurityGroup'
+            SubnetId: # Inject your subnet here.
+            TagSpecifications:
+              - ResourceType: instance
+                Tags:
+                  - Key: Name
+                    Value: !Sub ${AppName}-ecs-host-4
+
