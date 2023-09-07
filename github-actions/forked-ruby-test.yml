@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - staging
+    paths-ignore:
+      - '**.md'
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+      DB_HOST: localhost
+      DB_USER: postgres
+      DB_PORT: 5432
+
+    services:
+      postgres:
+        image: postgres:15.4-alpine
+        ports:
+        - 5432:5432
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:6-alpine
+        ports:
+        - 6379:6379
+        options: --entrypoint redis-server
+
+    strategy:
+      fail-fast: false
+      matrix:
+        ci_node_total: [2]
+        ci_node_index: [ 0, 1, 2 ]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        env:
+          ENV1: ${{ secrets.ENV1 }}
+          ENV2: ${{ secrets.ENV2 }}
+        with:
+          bundler-cache: true
+
+      - name: Setup DB
+        run: bin/rails db:create db:schema:load
+
+      - name: Run RSpec Tests
+        run: bin/rspec --format RSpec::Github::Formatter
