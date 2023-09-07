@@ -1,0 +1,117 @@
+on:
+  push:
+    paths:
+      - 'docker/**'
+    branches:
+      - main
+
+name: Deploy App when Docker is touched.
+jobs:
+  deploy-proxy:
+    name: Deploy Proxy
+    runs-on: ubuntu-latest
+    outputs:
+      env-name: ${{ steps.env-name.outputs.environment }}
+
+    steps:
+      - name: Notify Slack - Starting Build
+        id: slack
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        uses: voxmedia/github-action-slack-notify-build@v1
+        with:
+          channel: slack-channel
+          status: STARTING
+          color: warning
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure environment name
+        id: env-name
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          ENVIRONMENT='environment-name'
+          echo "Environment name: $ENVIRONMENT"
+          echo "::set-output name=environment::$ENVIRONMENT"
+
+      - name: Configure AWS Creds
+        id: creds
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Setup Node and Start App
+        uses: actions/setup-node@v2
+        with:
+          node-version: '16.3'
+           
+      - name: Test Node App
+        working-directory: docker/
+        run: |
+          sudo npm install
+          sudo npm run start&
+
+
+      - name: Test Node App
+        working-directory: docker/  
+        run: sudo npm test
+
+      - name: Build, tag, and push to AWS ECR
+        if: github.ref == 'refs/heads/main'
+        working-directory: docker/
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPO }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+      - name: Validate Cloudformation Template
+        run: |
+          aws cloudformation validate-template --region us-east-1 --template-body "location of file"
+
+      - name: Deploy ECS Template Service
+        if: github.ref == 'refs/heads/main'
+        id: proxy-service
+        uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: proxy-service
+          no-fail-on-empty-changeset: "1"
+          template: "location of file"
+          role-arn: arn:aws:iam::${{ steps.creds.outputs.aws-account-id }}:role/github-actions-cloudformation-stack-role
+          parameter-overrides: >-
+            ImageTag=${{ steps.build-image.outputs.image }}
+
+      - name: Notify Slack - Failure
+        if: failure()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        uses: voxmedia/github-action-slack-notify-build@v1
+        with:
+          message_id: ${{ steps.slack.outputs.message_id }}
+          channel: slack-channel
+          status: FAILED
+          color: danger
+
+      - name: Notify Slack - Success
+        if: success()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        uses: voxmedia/github-action-slack-notify-build@v1
+        with:
+          message_id: ${{ steps.slack.outputs.message_id }}
+          channel: slack-channel
+          status: SUCCESS
+          color: good
+

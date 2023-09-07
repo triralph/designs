@@ -1,0 +1,123 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: v1.0
+Parameters:
+  Project:
+    Type: String
+    Default: null
+  EnvType:
+    Description: Environment Type.
+    Default: Demo
+    Type: String
+    AllowedValues: [ Prod, Demo ]
+
+Mappings:
+  Environments:
+    Prod:
+      MultiAZ: true
+      Instance: db.t3.small
+      BackupRetentionPeriod: 14
+      DBSize: 50
+      StorageType: gp2
+      DBName: db_name
+    Demo:
+      MultiAZ: false
+      Instance: db.t3.micro
+      BackupRetentionPeriod: 2
+      DBSize: 20
+      StorageType: gp2
+      DBName: db_name
+
+# You will find a multitude of values missing in this template. You can either inject them through parameters, outputs, or global exports. It's a personal choice how you
+# wish to inject those values. 
+
+Resources:
+# My preferred method is to let the secrets manager create and tie a password to the resource upon creation.
+  RdsPassword:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: 'Password for SQL Instance'
+      GenerateSecretString:
+        SecretStringTemplate: '{ "username": "username" }'
+        GenerateStringKey: "password"
+        PasswordLength: 16
+        ExcludeCharacters: '"@/\'
+  
+  SecretRdsInstanceAttachment:
+    Type: "AWS::SecretsManager::SecretTargetAttachment"
+    Properties:
+      SecretId: !Ref RdsPassword
+      TargetId: !Ref RdsInstance
+      TargetType: AWS::RDS::DBInstance
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable PostgreSQL access on port 5432
+      VpcId: # See above
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 5432
+        ToPort: 5432
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value: !Sub ${Project}-security-group-rds
+
+  InstanceDBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: Parameter Group for RdsInstance
+      Family: postgres14
+      Parameters:
+        log_statement: ddl
+        log_rotation_age: '5'
+        log_min_duration_statement: '50'
+        rds.log_retention_period: '1440'
+        max_connections: '1000'
+        hot_standby_feedback: '1'
+      Tags:
+      - Key: Name
+        Value: !Sub ${Project}-db-parametergroup14
+
+  RdsPrivateSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for Stack RDS instances
+      SubnetIds:
+      - !ImportValue # See above
+      - !ImportValue # See above
+      Tags:
+      - Key: Name
+        Value: !Sub ${Project}-subnet-group-rds
+
+  RdsInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub ${Project}-rds
+      DBName: !FindInMap [ Environments, !Ref EnvType, DBName ]
+      AutoMinorVersionUpgrade: false
+      AllowMajorVersionUpgrade: true
+      AllocatedStorage: !FindInMap [ Environments, !Ref EnvType, DBSize ]
+      StorageType: !FindInMap [ Environments, !Ref EnvType, StorageType ]
+      DBInstanceClass: !FindInMap [ Environments, !Ref EnvType, Instance ]
+      MultiAZ: !FindInMap [ Environments, !Ref EnvType, MultiAZ ]
+      BackupRetentionPeriod: !FindInMap [ Environments, !Ref EnvType, BackupRetentionPeriod ]
+      Engine: postgres
+      EngineVersion: '14.4'
+      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RdsPassword, ':SecretString:username}}' ]]
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RdsPassword, ':SecretString:password}}' ]]
+      DBSubnetGroupName: !Ref RdsPrivateSubnetGroup
+      VPCSecurityGroups:
+      - !Ref InstanceSecurityGroup
+      DBParameterGroupName: !Ref InstanceDBParameterGroup
+      Tags:
+      - Key: Name
+        Value: !Sub ${Project}-rds
+
+Outputs:
+  RDS:
+    Value: !GetAtt RdsInstance.Endpoint.Address
+    Export:
+      Name: RDS
