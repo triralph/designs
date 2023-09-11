@@ -35,7 +35,7 @@ Parameters:
     Description: The cluster
     Type: String
   CurrentECRTag:
-    Description: The current ECR tag for Connect
+    Description: The current ECR tag for the Project
     Type: String
     Default: latest
   PipelineArtifactBucket:
