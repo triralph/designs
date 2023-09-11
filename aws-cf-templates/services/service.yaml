@@ -1,0 +1,523 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: v1.0 Simple App deployment
+Parameters:
+  RoleArn:
+    Type: String
+    Description: Role ARN
+  EnvType:
+    Description: Environment Type.
+    Default: Demo
+    Type: String
+    AllowedValues: [ Prod, Demo ]
+  Vpc:
+    Description: VPC ID
+    Type: AWS::EC2::VPC::Id
+  PublicSubnet1:
+    Description: 'PublicSubnet1 ID '
+    Type: AWS::EC2::Subnet::Id
+  PublicSubnet2:
+    Description: PublicSubnet2 ID
+    Type: AWS::EC2::Subnet::Id
+  LoadBalancerCertName:
+    Type: String
+    Description: The certificate name to be used by the load balancer
+    Default: "Insert_Your_SSL_Cert_Arn_Here"
+  DomainName:
+    Type: String
+    Description: The domain name for the stack
+    Default: example.com
+  ProjectName:
+    Default: ''
+    Description: The unique identifier for project
+    Type: String
+  ECScluster:
+    Description: The cluster
+    Type: String
+  CurrentECRTag:
+    Description: The current ECR tag for the Project
+    Type: String
+    Default: latest
+  PipelineArtifactBucket:
+    Description: CodePipeline Artifact Store.
+    Type: String
+    Default: BucketName
+
+Conditions:
+  CreateProdResources: !Equals [ !Ref EnvType, Prod ]
+  CreateDemoResources: !Equals [ !Ref EnvType, Demo ]
+
+Mappings:
+  Environments:
+    Prod:
+      Min: 2
+      Max: 8
+    Demo:
+      Min: 1
+      Max: 1
+
+Resources:
+  AppRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+      - !Ref RoleArn
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+            - codedeploy.amazonaws.com
+            - application-autoscaling.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+  AppRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: AppRolePolicy
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Action:
+          - Inject your requirements here
+          - Inject your requirements here
+          - Inject your requirements here
+          Resource: "Inject your resource here"
+      Roles:
+      - !Ref AppRole
+  AppInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+      - !Ref AppRole
+  AppHealthCheck:
+    Condition: CreateProdResources
+    Type: AWS::Route53::HealthCheck
+    Properties:
+      HealthCheckConfig:
+        Port: 443
+        Type: HTTPS
+        ResourcePath: "Inject your health check route"
+        FullyQualifiedDomainName: !Ref Route53
+        RequestInterval: 30
+        FailureThreshold: 3
+      HealthCheckTags:
+      - Key: Name
+        Value: !Sub ${ProjectName}-health_check
+    DependsOn:
+    - ContainerPipeline
+  DomainStatusAlarm:
+    Condition: CreateProdResources
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      ActionsEnabled: true
+      AlarmActions:
+      - SNS Topic ARN
+      AlarmDescription: !Sub https://${ProjectName}.${DomainName}/health_check is DOWN!!!!!
+      ComparisonOperator: LessThanThreshold
+      EvaluationPeriods: 2
+      MetricName: HealthCheckStatus
+      Namespace: AWS/Route53
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1.0
+      Dimensions:
+      - Name: HealthCheckId
+        Value: !Ref AppHealthCheck
+      OKActions:
+      - SNS Topic ARN
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "cloudformation.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - ecs:*
+                  - ecr:*
+                  - iam:*
+  ContainerPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: Inject Pipeline Name or use !Sub to build the name for your app
+      RoleArn: Inject Role or create Role and insert it into this template.
+      Stages:
+      - Name: Source
+        Actions:
+        - Name: SourceAction
+          ActionTypeId:
+            Category: Source
+            Owner: AWS
+            Version: '1'
+            Provider: ECR
+          OutputArtifacts:
+            - Name: SourceOutput
+          Configuration:
+            RepositoryName: ECR_REPO
+            ImageTag: ECR_IMAGE_TAG # This is used to poll the pipeline, upon upload of this new image this pipeline will get triggered.
+          RunOrder: 1
+      - Name: Tag-Migration
+        Actions:
+        - Name: UpdateTags
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Version: '1'
+            Provider: CodeBuild
+          Configuration:
+            ProjectName: !Sub ${ProjectName}-codebuild
+          InputArtifacts:
+            - Name: SourceOutput
+          OutputArtifacts:
+            - Name: AppTags
+          RunOrder: 1
+      - Name: Deploy
+        Actions:
+        - Name: AppUpdate
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Version: '1'
+            Provider: ECS
+          Configuration:
+            ClusterName: !Ref ECScluster
+            FileName: !Sub ${ProjectName}-codepipeline.json
+            ServiceName: !GetAtt WebService.Name
+          InputArtifacts:
+            - Name: AppTags
+          RunOrder: 1
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineArtifactBucket
+  Loadbalancer:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Name: !Sub $ProjectName}-alb
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      Tags:
+        - Key: clec_id
+          Value: !Ref ClecId
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP access on the configured port
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value: !Sub ${ProjectName}-alb-sg
+  HTTPSResponderListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref WebTargetGroup
+      LoadBalancerArn: !Ref Loadbalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref 'LoadBalancerCertName'
+      SslPolicy: ELBSecurityPolicy-TLS-1-2-2017-01
+  HTTPResponderListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref WebTargetGroup
+      LoadBalancerArn: !Ref Loadbalancer
+      Port: 80
+      Protocol: HTTP
+  WebListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn: !Ref WebTargetGroup
+      Conditions:
+      - Field: host-header
+        Values:
+        - !Sub ${ProjectName}.${DomainName}
+      ListenerArn: !Ref HTTPSResponderListener
+      Priority: 1
+  WebListenerRule80:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn: !Ref TargetGroup
+      Conditions:
+      - Field: host-header
+        Values:
+        - !Sub ${ProjectName}.${DomainName}
+      ListenerArn: !Ref HTTPResponderListener
+      Priority: 1
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 60
+      UnhealthyThresholdCount: 10
+      HealthCheckPath: /health_check
+      Port: 3001
+      Protocol: HTTP
+      VpcId: !Ref Vpc
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '5'
+  TaskDef:
+      Type: "AWS::ECS::TaskDefinition"
+      Properties:
+        NetworkMode: bridge
+        ContainerDefinitions:
+        - VolumesFrom: []
+          Memory: 1024
+          PortMappings:
+          - HostPort: 0
+            ContainerPort: 80
+            Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+          Essential: true
+          Command:
+            - sh
+            - -c
+            - "Your Start up command here"
+          MountPoints: []
+          Name: !Sub ${ProjectName}
+          Environment:
+          - Name: ENV_1
+            Value: ENV_1_VALUE
+          - Name: ENV_2
+            Value: ENV_2_VALUE
+          - Name: ENV_3
+            Value: ENV_3_VALUE
+          WorkingDirectory: !Sub ${ProjectName}-dir
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ProjectName}:${CurrentECRTag}
+          Cpu: 0
+        Volumes: []
+        Family: !Sub ${ProjectName}
+  ContainerAutoscalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [application-autoscaling.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: service-autoscaling
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - application-autoscaling:*
+            - cloudwatch:DescribeAlarms
+            - cloudwatch:PutMetricAlarm
+            - ecs:DescribeServices
+            - ecs:UpdateService
+            - ecs:Submit*
+            - ecs:CreateCluster
+            - ec2:ModifySpotFleetRequest
+            - ec2:DescribeSpotFleetRequests
+            Resource: "*"
+
+  WebRoute53:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneName: !Sub ${DomainName}.
+      Comment: Alias record for slackbot.
+      Name: !Sub ${ProjectName}.${DomainName}.
+      Type: A
+      SetIdentifier: Frontend ALB
+      Weight: 1
+      AliasTarget:
+        HostedZoneId: !GetAtt Loadbalancer.CanonicalHostedZoneID
+        DNSName: !GetAtt Loadbalancer.DNSName
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: WebListenerRule
+    Properties:
+      ServiceName: !Sub ${ProjectName}-service
+      Role: !!Ref RoleArn
+      TaskDefinition: !Ref TaskDef
+      DesiredCount: !FindInMap [ Environments, !Ref EnvType, Min ]
+      PlacementStrategies:
+      - Type: spread
+        Field: instanceId
+      - Type: spread
+        Field: attribute:ecs.availability-zone
+      LoadBalancers:
+      - TargetGroupArn:
+          !Ref TargetGroup
+        ContainerPort: 80
+        ContainerName: !Sub ${ProjectName}
+      Cluster: !Ref ECScluster
+  ServiceScalingTarget:
+    Condition: CreateProdResources
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MinCapacity: !FindInMap [ Environments, !Ref EnvType, Min ]
+      MaxCapacity: !FindInMap [ Environments, !Ref EnvType, Max ]
+      ResourceId: !Join ['',[service/, !Ref 'ECScluster', /, !GetAtt [Service, Name]]]
+      RoleARN: !GetAtt [ ContainerAutoscalingRole, Arn ]
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+  ServiceScalingPolicy:
+    Condition: CreateProdResources
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub AStepPolicy-${ProjectName}
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref 'ServiceScalingTarget'
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 60
+        MetricAggregationType: Average
+        StepAdjustments:
+        - MetricIntervalLowerBound: 0.5
+          ScalingAdjustment: 1
+        - MetricIntervalUpperBound: 0.5
+          ScalingAdjustment: -1
+  WebScalingAlarm:
+    Condition: CreateProdResources
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      EvaluationPeriods: 1
+      Statistic: Minimum
+      Threshold: 0.5
+      AlarmDescription: !Sub ${ProjectName} has triggered a scaling event.
+      Period: 60
+      AlarmActions: [!Ref 'ServiceScalingPolicy']
+      OKActions: [!Ref 'ServiceScalingPolicy']
+      Namespace: AWS/ApplicationELB
+      Dimensions:
+      - Name: LoadBalancer
+        Value: !GetAtt Loadbalancer.LoadBalancerFullName
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      MetricName: TargetResponseTime
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildRole
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+              - Resource: arn:aws:s3:::${PipelineBucket}/*
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectVersion
+              - Resource: !Sub arn:aws:s3:::${PipelineArtifactBucket}/*
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectVersion
+              - Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ProjectName}
+                Effect: Allow
+                Action:
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+  CodeBuildProject:
+     Type: AWS::CodeBuild::Project
+     Properties:
+       Name: !Sub ${ProjectName}-CodeBuild
+       ServiceRole: !Ref CodeBuildRole
+       Environment:
+         ComputeType: BUILD_GENERAL1_SMALL
+         Image: aws/codebuild/docker:17.09.0
+         Type: LINUX_CONTAINER
+         EnvironmentVariables:
+           - Name: AWS_DEFAULT_REGION
+             Value: !Ref AWS::Region
+           - Name: REPOSITORY_URI
+             Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ProjectName}
+           - Name: PROJECT_NAME
+             Value: !Ref ProjectName
+           - Name: DEPLOY_TAG
+             Value: latest
+           - Name: IMAGE_TAG
+             Value: !Sub ${ProjectName}-latest
+       Artifacts:
+         Type: S3
+         Location: !Ref PipelineArtifactBucket
+         NamespaceType: BUILD_ID
+         OverrideArtifactName: true
+         Path: !Sub ${ProjectName}
+       Source:
+         Type: NO_SOURCE
+         BuildSpec: |
+           version: 0.2
+           phases:
+             pre_build:
+               commands:
+                 - echo Checking AWS CLI version...
+                 - aws --version
+             build:
+               commands:
+                 - echo Logging into Amazon ECR
+                 - $(aws ecr get-login --region $AWS_DEFAULT_REGION --no-include-email)
+                 - MANIFEST=$(aws ecr batch-get-image --repository-name $PROJECT_NAME --image-ids imageTag=$DEPLOY_TAG --query 'images[].imageManifest' --output text)
+                 - echo Image tag has been caught...
+                 - aws ecr put-image --repository-name $PROJECT_NAME --image-tag $IMAGE_TAG --image-manifest "$MANIFEST"
+             post_build:
+               commands:
+                 - echo Build completed on `date`
+                 - echo Latest Tag has been added to Subdomain of the Customer...
+                 - echo Writing image definitions file...
+                 - printf '[{"name":"%s","imageUri":"%s"}]' $CUSTOMER_SUBDOMAIN $REPOSITORY_URI:$IMAGE_TAG > $PROJECT_NAME-codepipeline.json
+           artifacts:
+             files:
+                 - '*'
