@@ -517,7 +517,7 @@ Resources:
                  - echo Build completed on `date`
                  - echo Latest Tag has been added to Subdomain of the Customer...
                  - echo Writing image definitions file...
-                 - printf '[{"name":"%s","imageUri":"%s"}]' $CUSTOMER_SUBDOMAIN $REPOSITORY_URI:$IMAGE_TAG > $PROJECT_NAME-codepipeline.json
+                 - printf '[{"name":"%s","imageUri":"%s"}]' $PROJECT_NAME $REPOSITORY_URI:$IMAGE_TAG > $PROJECT_NAME-codepipeline.json
            artifacts:
              files:
                  - '*'
