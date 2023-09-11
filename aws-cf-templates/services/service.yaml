@@ -242,7 +242,7 @@ Resources:
       DefaultActions:
       - Type: forward
         TargetGroupArn: !Ref WebTargetGroup
-      LoadBalancerArn: !Ref MagneticApplicationLoadbalancer
+      LoadBalancerArn: !Ref Loadbalancer
       Port: 443
       Protocol: HTTPS
       Certificates:
